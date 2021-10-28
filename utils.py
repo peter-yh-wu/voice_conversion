@@ -16,7 +16,7 @@ from torch.autograd import Variable
 
 def cc(net):
     if torch.cuda.is_available():
-        return net.cuda()
+        return net.cuda(0)
     else:
         return net
 
@@ -27,7 +27,7 @@ def gen_noise(x_dim, y_dim):
 
 def to_var(x, requires_grad=True):
     x = Variable(x, requires_grad=requires_grad)
-    return x.cuda() if torch.cuda.is_available() else x
+    return x.cuda(0) if torch.cuda.is_available() else x
 
 def reset_grad(net_list):
     for net in net_list:
@@ -40,14 +40,14 @@ def grad_clip(net_list, max_grad_norm):
 def calculate_gradients_penalty(netD, real_data, fake_data):
     alpha = torch.rand(real_data.size(0))
     alpha = alpha.view(real_data.size(0), 1, 1)
-    alpha = alpha.cuda() if torch.cuda.is_available() else alpha
+    alpha = alpha.cuda(0) if torch.cuda.is_available() else alpha
     alpha = Variable(alpha)
     interpolates = alpha * real_data + (1 - alpha) * fake_data
 
     disc_interpolates = netD(interpolates)
 
     use_cuda = torch.cuda.is_available()
-    grad_outputs = torch.ones(disc_interpolates.size()).cuda() if use_cuda else torch.ones(disc_interpolates.size())
+    grad_outputs = torch.ones(disc_interpolates.size()).cuda(0) if use_cuda else torch.ones(disc_interpolates.size())
 
     gradients = torch.autograd.grad(
         outputs=disc_interpolates,

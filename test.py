@@ -31,7 +31,7 @@ if __name__ == '__main__':
     _, spec = get_spectrograms(args.source)
     spec_expand = np.expand_dims(spec, axis=0)
     spec_tensor = torch.from_numpy(spec_expand).type(torch.FloatTensor)
-    c = Variable(torch.from_numpy(np.array([int(args.target)]))).cuda()
+    c = Variable(torch.from_numpy(np.array([int(args.target)]))).cuda(1)
     result = solver.test_step(spec_tensor, c, gen=args.use_gen)
     result = result.squeeze(axis=0).transpose((1, 0))
     wav_data = spectrogram2wav(result)

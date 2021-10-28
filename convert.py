@@ -56,7 +56,7 @@ def synthesis(f0, sp, ap, sr=16000):
     return y
 
 def convert_sp(sp, c, solver, gen=True):
-    c_var = Variable(torch.from_numpy(np.array([c]))).cuda()
+    c_var = Variable(torch.from_numpy(np.array([c]))).cuda(0)
     sp_tensor = torch.from_numpy(np.expand_dims(sp, axis=0))
     sp_tensor = sp_tensor.type(torch.FloatTensor)
     converted_sp = solver.test_step(sp_tensor, c_var, gen=gen)
@@ -64,7 +64,7 @@ def convert_sp(sp, c, solver, gen=True):
     return converted_sp
 
 def convert_mc(mc, c, solver, gen=True):
-    c_var = Variable(torch.from_numpy(np.array([c]))).cuda()
+    c_var = Variable(torch.from_numpy(np.array([c]))).cuda(0)
     mc_tensor = torch.from_numpy(np.expand_dims(mc, axis=0))
     mc_tensor = mc_tensor.type(torch.FloatTensor)
     converted_mc = solver.test_step(mc_tensor, c_var, gen=gen)

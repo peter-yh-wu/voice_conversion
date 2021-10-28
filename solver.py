@@ -34,11 +34,11 @@ class Solver(object):
         hps = self.hps
         ns = self.hps.ns
         emb_size = self.hps.emb_size
-        self.Encoder = cc(Encoder(ns=ns, dp=hps.enc_dp))
-        self.Decoder = cc(Decoder(ns=ns, c_a=hps.n_speakers, emb_size=emb_size))
-        self.Generator = cc(Decoder(ns=ns, c_a=hps.n_speakers, emb_size=emb_size))
-        self.SpeakerClassifier = cc(SpeakerClassifier(ns=ns, n_class=hps.n_speakers, dp=hps.dis_dp))
-        self.PatchDiscriminator = cc(nn.DataParallel(PatchDiscriminator(ns=ns, n_class=hps.n_speakers)))
+        self.Encoder = (Encoder(ns=ns, dp=hps.enc_dp)).cuda(0)
+        self.Decoder = (Decoder(ns=ns, c_a=hps.n_speakers, emb_size=emb_size)).cuda(0)
+        self.Generator = (Decoder(ns=ns, c_a=hps.n_speakers, emb_size=emb_size)).cuda(0)
+        self.SpeakerClassifier = (SpeakerClassifier(ns=ns, n_class=hps.n_speakers, dp=hps.dis_dp)).cuda(0)
+        self.PatchDiscriminator = (nn.DataParallel(PatchDiscriminator(ns=ns, n_class=hps.n_speakers))).cuda(0)
         betas = (0.5, 0.9)
         params = list(self.Encoder.parameters()) + list(self.Decoder.parameters())
         self.ae_opt = optim.Adam(params, lr=self.hps.lr, betas=betas)
@@ -107,7 +107,7 @@ class Solver(object):
         c_sample = Variable(
                 torch.multinomial(torch.ones(n_speakers), num_samples=size, replacement=True),  
                 requires_grad=False)
-        c_sample = c_sample.cuda() if torch.cuda.is_available() else c_sample
+        c_sample = c_sample.cuda(0) if torch.cuda.is_available() else c_sample
         return c_sample
 
     def encode_step(self, x):

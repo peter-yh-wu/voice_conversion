@@ -44,7 +44,7 @@ def RNN(inp, layer):
     inp_permuted = inp.permute(2, 0, 1)
     state_mul = (int(layer.bidirectional) + 1) * layer.num_layers
     zero_state = Variable(torch.zeros(state_mul, inp.size(0), layer.hidden_size))
-    zero_state = zero_state.cuda() if torch.cuda.is_available() else zero_state
+    zero_state = zero_state.cuda(0) if torch.cuda.is_available() else zero_state
     out_permuted, _ = layer(inp_permuted, zero_state)
     out_rnn = out_permuted.permute(1, 2, 0)
     return out_rnn
