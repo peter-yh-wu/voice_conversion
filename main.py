@@ -18,15 +18,18 @@ if __name__ == '__main__':
     parser.add_argument('-load_model_path')
     parser.add_argument('-dataset_path')
     parser.add_argument('-index_path')
+    parser.add_argument('-info_path')
     parser.add_argument('-output_model_path')
+    parser.add_argument('-mode', choices=['default', 'gender', 'accent'])
     args = parser.parse_args()
     hps = Hps()
     hps.load(args.hps_path)
     hps_tuple = hps.get_tuple()
-    dataset = SingleDataset(args.dataset_path, args.index_path, seg_len=hps_tuple.seg_len)
+    dataset = SingleDataset(args.dataset_path, args.index_path, args.info_path, seg_len=hps_tuple.seg_len)
     data_loader = DataLoader(dataset)
 
-    solver = Solver(hps_tuple, data_loader)
+    log_dir = './log_%s/' % args.mode
+    solver = Solver(hps_tuple, data_loader, mode=args.mode, log_dir=log_dir)
     if args.load_model:
         solver.load_model(args.load_model_path)
 

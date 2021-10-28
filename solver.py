@@ -22,7 +22,8 @@ from utils import calculate_gradients_penalty
 from utils import gen_noise
 
 class Solver(object):
-    def __init__(self, hps, data_loader, log_dir='./log/'):
+    def __init__(self, hps, data_loader, mode='default', log_dir='./log/'):
+        self.mode = mode
         self.hps = hps
         self.data_loader = data_loader
         self.model_kept = []
@@ -34,11 +35,19 @@ class Solver(object):
         hps = self.hps
         ns = self.hps.ns
         emb_size = self.hps.emb_size
-        self.Encoder = (Encoder(ns=ns, dp=hps.enc_dp)).cuda(0)
-        self.Decoder = (Decoder(ns=ns, c_a=hps.n_speakers, emb_size=emb_size)).cuda(0)
-        self.Generator = (Decoder(ns=ns, c_a=hps.n_speakers, emb_size=emb_size)).cuda(0)
-        self.SpeakerClassifier = (SpeakerClassifier(ns=ns, n_class=hps.n_speakers, dp=hps.dis_dp)).cuda(0)
-        self.PatchDiscriminator = (nn.DataParallel(PatchDiscriminator(ns=ns, n_class=hps.n_speakers))).cuda(0)
+        self.Encoder = cc(Encoder(ns=ns, dp=hps.enc_dp))
+        self.Decoder = cc(Decoder(ns=ns, c_a=hps.n_speakers, emb_size=emb_size))
+        self.Generator = cc(Decoder(ns=ns, c_a=hps.n_speakers, emb_size=emb_size))
+        if self.mode == 'default':
+            self.SpeakerClassifier = cc(SpeakerClassifier(ns=ns, n_class=hps.n_speakers, dp=hps.dis_dp))
+        elif self.mode == 'gender':
+            self.SpeakerClassifier = cc(SpeakerClassifier(ns=ns, n_class=2, dp=hps.dis_dp))
+        elif self.mode == 'accent':
+            self.SpeakerClassifier = cc(SpeakerClassifier(ns=ns, n_class=11, dp=hps.dis_dp))
+        else:
+            print('unsupported mode')
+            exit()
+        self.PatchDiscriminator = cc(nn.DataParallel(PatchDiscriminator(ns=ns, n_class=hps.n_speakers)))
         betas = (0.5, 0.9)
         params = list(self.Encoder.parameters()) + list(self.Decoder.parameters())
         self.ae_opt = optim.Adam(params, lr=self.hps.lr, betas=betas)
@@ -100,14 +109,16 @@ class Solver(object):
     def permute_data(self, data):
         C = to_var(data[0], requires_grad=False)
         X = to_var(data[1]).permute(0, 2, 1)
-        return C, X
+        S = to_var(data[2], requires_grad=False)
+        A = to_var(data[3], requires_grad=False)
+        return C, X, S, A
 
     def sample_c(self, size):
         n_speakers = self.hps.n_speakers
         c_sample = Variable(
                 torch.multinomial(torch.ones(n_speakers), num_samples=size, replacement=True),  
                 requires_grad=False)
-        c_sample = c_sample.cuda(0) if torch.cuda.is_available() else c_sample
+        c_sample = c_sample.cuda() if torch.cuda.is_available() else c_sample
         return c_sample
 
     def encode_step(self, x):
@@ -148,7 +159,7 @@ class Solver(object):
         if mode == 'pretrain_G':
             for iteration in range(hps.enc_pretrain_iters):
                 data = next(self.data_loader)
-                c, x = self.permute_data(data)
+                c, x, s, a = self.permute_data(data)
                 # encode
                 enc = self.encode_step(x)
                 x_tilde = self.decode_step(enc, c)
@@ -170,19 +181,29 @@ class Solver(object):
         elif mode == 'pretrain_D':
             for iteration in range(hps.dis_pretrain_iters):
                 data = next(self.data_loader)
-                c, x = self.permute_data(data)
+                c, x, s, a = self.permute_data(data)
                 # encode
                 enc = self.encode_step(x)
                 # classify speaker
                 logits = self.clf_step(enc)
-                loss_clf = self.cal_loss(logits, c)
+                if self.mode == 'default':
+                    loss_clf = self.cal_loss(logits, c)
+                elif self.mode == 'gender':
+                    loss_clf = self.cal_loss(logits, s)
+                else:
+                    loss_clf = self.cal_loss(logits, a)
                 # update 
                 reset_grad([self.SpeakerClassifier])
                 loss_clf.backward()
                 grad_clip([self.SpeakerClassifier], self.hps.max_grad_norm)
                 self.clf_opt.step()
                 # calculate acc
-                acc = cal_acc(logits, c)
+                if self.mode == 'default':
+                    acc = cal_acc(logits, c)
+                elif self.mode == 'gender':
+                    acc = cal_acc(logits, s)
+                else:
+                    acc = cal_acc(logits, a)
                 info = {
                     f'{flag}/pre_loss_clf': loss_clf.item(),
                     f'{flag}/pre_acc': acc,
@@ -198,7 +219,7 @@ class Solver(object):
                 #=======train D=========#
                 for step in range(hps.n_patch_steps):
                     data = next(self.data_loader)
-                    c, x = self.permute_data(data)
+                    c, x, s, a = self.permute_data(data)
                     ## encode
                     enc = self.encode_step(x)
                     # sample c
@@ -230,7 +251,7 @@ class Solver(object):
                             self.logger.scalar_summary(tag, value, iteration + 1)
                 #=======train G=========#
                 data = next(self.data_loader)
-                c, x = self.permute_data(data)
+                c, x, s, a = self.permute_data(data)
                 # encode
                 enc = self.encode_step(x)
                 # sample c
@@ -271,12 +292,17 @@ class Solver(object):
                 #==================train D==================#
                 for step in range(hps.n_latent_steps):
                     data = next(self.data_loader)
-                    c, x = self.permute_data(data)
+                    c, x, s, a = self.permute_data(data)
                     # encode
                     enc = self.encode_step(x)
                     # classify speaker
                     logits = self.clf_step(enc)
-                    loss_clf = self.cal_loss(logits, c)
+                    if self.mode == 'default':
+                        loss_clf = self.cal_loss(logits, c)
+                    elif self.mode == 'gender':
+                        loss_clf = self.cal_loss(logits, s)
+                    else:
+                        loss_clf = self.cal_loss(logits, a)
                     loss = hps.alpha_dis * loss_clf
                     # update 
                     reset_grad([self.SpeakerClassifier])
@@ -284,7 +310,12 @@ class Solver(object):
                     grad_clip([self.SpeakerClassifier], self.hps.max_grad_norm)
                     self.clf_opt.step()
                     # calculate acc
-                    acc = cal_acc(logits, c)
+                    if self.mode == 'default':
+                        acc = cal_acc(logits, c)
+                    elif self.mode == 'gender':
+                        acc = cal_acc(logits, s)
+                    else:
+                        acc = cal_acc(logits, a)
                     info = {
                         f'{flag}/D_loss_clf': loss_clf.item(),
                         f'{flag}/D_acc': acc,
@@ -297,7 +328,7 @@ class Solver(object):
                             self.logger.scalar_summary(tag, value, iteration + 1)
                 #==================train G==================#
                 data = next(self.data_loader)
-                c, x = self.permute_data(data)
+                c, x, s, a = self.permute_data(data)
                 # encode
                 enc = self.encode_step(x)
                 # decode
@@ -305,8 +336,18 @@ class Solver(object):
                 loss_rec = torch.mean(torch.abs(x_tilde - x))
                 # classify speaker
                 logits = self.clf_step(enc)
-                acc = cal_acc(logits, c)
-                loss_clf = self.cal_loss(logits, c)
+                if self.mode == 'default':
+                    acc = cal_acc(logits, c)
+                elif self.mode == 'gender':
+                    acc = cal_acc(logits, s)
+                else:
+                    acc = cal_acc(logits, a)
+                if self.mode == 'default':
+                    loss_clf = self.cal_loss(logits, c)
+                elif self.mode == 'gender':
+                    loss_clf = self.cal_loss(logits, s)
+                else:
+                    loss_clf = self.cal_loss(logits, a)
                 # maximize classification loss
                 loss = loss_rec - current_alpha * loss_clf
                 reset_grad([self.Encoder, self.Decoder])

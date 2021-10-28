@@ -1,3 +1,10 @@
+# Notes
+
+- This branch modifies the original GAN to support the loss functions described in this [paper](https://arxiv.org/abs/2101.08919).
+- To change the loss function, use the `-mode` argument in `main.py`.
+
+---
+
 # Multi-target Voice Conversion without Parallel Data by Adversarially Learning Disentangled Audio Representations
 This is the official implementation of the paper [Multi-target Voice Conversion without Parallel Data by Adversarially Learning Disentangled Audio Representations](https://arxiv.org/abs/1804.02812).
 You can find the demo webpage [here](https://jjery2243542.github.io/voice_conversion_demo/), and the pretrained model [here](http://speech.ee.ntu.edu.tw/~jjery2243542/resource/model/is18/model.pkl).

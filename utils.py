@@ -16,7 +16,7 @@ from torch.autograd import Variable
 
 def cc(net):
     if torch.cuda.is_available():
-        return net.cuda(0)
+        return net.cuda()
     else:
         return net
 
@@ -27,7 +27,7 @@ def gen_noise(x_dim, y_dim):
 
 def to_var(x, requires_grad=True):
     x = Variable(x, requires_grad=requires_grad)
-    return x.cuda(0) if torch.cuda.is_available() else x
+    return x.cuda() if torch.cuda.is_available() else x
 
 def reset_grad(net_list):
     for net in net_list:
@@ -40,14 +40,14 @@ def grad_clip(net_list, max_grad_norm):
 def calculate_gradients_penalty(netD, real_data, fake_data):
     alpha = torch.rand(real_data.size(0))
     alpha = alpha.view(real_data.size(0), 1, 1)
-    alpha = alpha.cuda(0) if torch.cuda.is_available() else alpha
+    alpha = alpha.cuda() if torch.cuda.is_available() else alpha
     alpha = Variable(alpha)
     interpolates = alpha * real_data + (1 - alpha) * fake_data
 
     disc_interpolates = netD(interpolates)
 
     use_cuda = torch.cuda.is_available()
-    grad_outputs = torch.ones(disc_interpolates.size()).cuda(0) if use_cuda else torch.ones(disc_interpolates.size())
+    grad_outputs = torch.ones(disc_interpolates.size()).cuda() if use_cuda else torch.ones(disc_interpolates.size())
 
     gradients = torch.autograd.grad(
         outputs=disc_interpolates,
@@ -128,8 +128,12 @@ class DataLoader(object):
         return self
 
     def __next__(self):
+        # self.dataset[self.index] is e.g. (int, (128, 513), int, int)
         samples = [self.dataset[self.index + i] for i in range(self.batch_size)]
+            # list of tuples
         batch = [[s for s in sample] for sample in zip(*samples)]
+            # len 4, batch[0] is list of speaker labels, batch[1] is list of spectrograms
+            # batch[2] is list of gender labels, batch[3] is list of accent labels
         batch_tensor = [torch.from_numpy(np.array(data)) for data in batch]
 
         if self.index + 2 * self.batch_size >= len(self.dataset):
@@ -139,13 +143,24 @@ class DataLoader(object):
         return tuple(batch_tensor)
 
 class SingleDataset(data.Dataset):
-    def __init__(self, h5_path, index_path, dset='train', seg_len=128):
+    def __init__(self, h5_path, index_path, info_path, dset='train', seg_len=128):
         self.dataset = h5py.File(h5_path, 'r')
         with open(index_path) as f_index:
             self.indexes = json.load(f_index)
         self.indexer = namedtuple('index', ['speaker', 'i', 't'])
         self.seg_len = seg_len
         self.dset = dset
+        with open(info_path, 'r') as inf:
+            metadata = inf.readlines()
+        metadata = [l.strip() for l in metadata][1:] # ignore header line
+        metadata = [l for l in metadata if len(l) > 0 and l[0] != ';']
+        metadata = [l.split(' ') for l in metadata]
+        metadata = [[l.strip() for l in ll if l.strip() != ''] for ll in metadata]
+        self.speaker_id_to_gender = {l[0]:l[2] for l in metadata}
+        id_to_accent = {l[0]:l[3] for l in metadata}
+        self.accents = sorted(list(set(id_to_accent.values())))
+        accent_to_label = {a:i for i, a in enumerate(self.accents)}
+        self.speaker_id_to_accent = {s:accent_to_label[id_to_accent[s]] for s in id_to_accent}
 
     def __getitem__(self, i):
         index = self.indexes[i]
@@ -153,7 +168,10 @@ class SingleDataset(data.Dataset):
         speaker = index.speaker
         i, t = index.i, index.t
         seg_len = self.seg_len
-        data = [speaker, self.dataset[f'{self.dset}/{i}'][t:t+seg_len]]
+        speaker_id = i.split('/')[0] # e.g. 277
+        gender = int(self.speaker_id_to_gender[speaker_id] == 'F') # 1 female, 0 male
+        accent = self.speaker_id_to_accent[speaker_id]
+        data = [speaker, self.dataset[f'{self.dset}/{i}'][t:t+seg_len], gender, accent] # e.g. [int, (128, 513), int, int]
         return tuple(data)
 
     def __len__(self):
